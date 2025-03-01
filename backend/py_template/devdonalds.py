@@ -206,7 +206,7 @@ def summary_error_check(recipe_name: str) -> ErrorCheckReturn:
 
 	return ErrorCheckReturn(False, None, None)
 
-# updates the ingredients_quantity map with the ingredients needed by recipe with recipe_name
+# recursively updates the ingredients_quantity map with the ingredients needed by recipe with recipe_name
 def update_ingredients(item_name: str, ingredients_quantity: Dict[str, int], quantity_needed: int) -> None:
 	if item_name in cookbook.ingredients:
 		# item is an ingredient
@@ -218,13 +218,18 @@ def update_ingredients(item_name: str, ingredients_quantity: Dict[str, int], qua
 		# item is a recipe
 		recipe = cookbook.recipes[item_name]
 		for required_item in recipe.required_items:
+			# update ingredients for each required ingredient of current recipe
 			update_ingredients(required_item.name, ingredients_quantity, quantity_needed * required_item.quantity)
 
 # handles the logic of the summary GET request
 def summary_logic(recipe_name: str) -> SummaryReturn:
+	# stores all the ingredient_name -> quantity needed for current recipe
 	ingredients_quantity: Dict[str, int] = {}
 	update_ingredients(recipe_name, ingredients_quantity, 1)
+
+	# format ingredients for output
 	ingredients = []
+	# calculate total cook time based on ingredients
 	total_cook_time = 0
 	for name, quantity in ingredients_quantity.items():
 		ingredients.append(RequiredItem(name, quantity))
@@ -240,7 +245,8 @@ def summary():
 	error_check_result = summary_error_check(recipe_name)
 	if error_check_result.error_occurred:
 		return error_check_result.error_message, error_check_result.error_code
-	return jsonify(summary_logic(recipe_name)), 200
+	result = summary_logic(recipe_name)
+	return jsonify(result), 200
 
 
 # =============================================================================
