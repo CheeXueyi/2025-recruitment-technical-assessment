@@ -41,10 +41,35 @@ def parse():
 	return jsonify({'msg': parsed_name}), 200
 
 # [TASK 1] ====================================================================
+# Removes all characters except letters and whitespace
+def remove_illegal_chars(str_to_filter: str) -> str:
+	list_of_chars = []
+	for char in str_to_filter:
+		if char.isalpha() or char == ' ':
+			list_of_chars.append(char)
+	
+	return ''.join(list_of_chars)
+
 # Takes in a recipeName and returns it in a form that 
 def parse_handwriting(recipeName: str) -> Union[str | None]:
-	# TODO: implement me
-	return recipeName
+	# replace hyphens and underscores
+	recipeName = recipeName.replace('-', ' ')
+	recipeName = recipeName.replace('_', ' ')
+
+	# remove non-letters and non-whitespace characters
+	recipeName = remove_illegal_chars(recipeName)
+
+	# convert multiple spaces into single spaces
+	words = ' '.join(recipeName.split())
+	recipeName = ''.join(words)
+	
+	# title case each word
+	recipeName = recipeName.title()
+
+	if len(recipeName) == 0:
+		return None
+	else:
+		return recipeName
 
 
 # [TASK 2] ====================================================================
