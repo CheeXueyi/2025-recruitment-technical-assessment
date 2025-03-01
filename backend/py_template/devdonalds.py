@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Dict, Union
+from typing import List, Dict, Union, TypedDict
 from flask import Flask, request, jsonify
 import re
 
@@ -29,12 +29,19 @@ class ErrorCheckReturn:
 
 @dataclass
 class Cookbook:
-	recipes: dict
-	ingredients: dict
+	# recipe name -> Recipe object
+	recipes: Dict[str, Recipe]
+	# ingredient name -> Ingredient object
+	ingredients: Dict[str, Ingredient]
 
 	def __init__(self):
 		self.recipes = {}
 		self.ingredients = {}
+
+class SummaryReturn(TypedDict):
+	name: str
+	cookTime: int
+	ingredients: List[RequiredItem]
 
 
 # =============================================================================
@@ -89,7 +96,7 @@ def parse_handwriting(recipeName: str) -> Union[str | None]:
 
 # [TASK 2] ====================================================================
 # checks the payload for create_entry POST request for errors
-def create_entry_error_check(data: dict) -> ErrorCheckReturn:
+def create_entry_error_check(data: Dict) -> ErrorCheckReturn:
 	# check type
 	if (data['type'] != 'recipe') and (data['type'] != 'ingredient'):
 		return ErrorCheckReturn(True, 400, 'type can only be \"recipe\" or \"ingredient\"')
@@ -120,7 +127,7 @@ def add_ingredient(data: dict) -> None:
 	cookbook.ingredients[name] = Ingredient(name, cook_time)
 
 # adds recipe specified by data into the cookbook
-def add_recipe(data: dict) -> None:
+def add_recipe(data: Dict) -> None:
 	recipe_name = data['name']
 	required_items = []
 	for item in data['requiredItems']:
@@ -130,12 +137,11 @@ def add_recipe(data: dict) -> None:
 	cookbook.recipes[recipe_name] = Recipe(recipe_name, required_items)
 
 # handles the logic for the create_entry POST request
-def create_entry_logic(data: dict) -> None:
+def create_entry_logic(data: Dict) -> None:
 	if data['type'] == 'ingredient':
 		add_ingredient(data)
 	elif data['type'] == 'recipe':
 		add_recipe(data)
-
 
 # Endpoint that adds a CookbookEntry to your magical cookbook
 @app.route('/entry', methods=['POST'])
@@ -150,11 +156,91 @@ def create_entry():
 
 
 # [TASK 3] ====================================================================
+# recursive helper function to check if a recipe is valid
+def recipe_is_valid_recurse(item_name: str, is_valid: Dict[str, bool]) -> bool:
+	# check if we have previously checked this item
+	if item_name in is_valid:
+		return is_valid[item_name]
+	
+	if item_name in cookbook.ingredients:
+		# item is an ingredient
+		is_valid[item_name] = True
+		return True
+	elif item_name in cookbook.recipes:
+		# item is a recipe
+		recipe = cookbook.recipes[item_name]
+		# check validity of each required item
+		for required_item in recipe.required_items:
+			if not recipe_is_valid_recurse(required_item.name, is_valid):
+				# some required item is not valid
+				is_valid[item_name] = False
+				return False
+		# every required item is valid, so this item is valid
+		is_valid[item_name] = True
+		return True
+	else:
+		# item is not registered in cookbook
+		is_valid[item_name] = False
+		return False
+
+# for a given recipe name, returns true all of its required ingredients and recipes are
+# registered in the cookbook
+def recipe_is_valid(recipe_name: str) -> bool:
+	# memoisation to increase performance 
+	is_valid = {}
+	return recipe_is_valid_recurse(recipe_name, is_valid)
+
+# checks for errors for the given recipe name for the summary GET request
+def summary_error_check(recipe_name: str) -> ErrorCheckReturn:
+	# check if queried recipe is an ingredient
+	if recipe_name in cookbook.ingredients:
+		return ErrorCheckReturn(True, 400, 'Searched name is an ingredient')
+	
+	# check if queried recipe is in the recipes list
+	if recipe_name not in cookbook.recipes:
+		return ErrorCheckReturn(True, 400, f'Cannot find recipe of name {recipe_name}')
+	
+	# check if there are any required items that are not in cookbook
+	if not recipe_is_valid(recipe_name):
+		return ErrorCheckReturn(True, 400, 'Recipe depends on some item that is not in the cook book')
+
+	return ErrorCheckReturn(False, None, None)
+
+# updates the ingredients_quantity map with the ingredients needed by recipe with recipe_name
+def update_ingredients(item_name: str, ingredients_quantity: Dict[str, int], quantity_needed: int) -> None:
+	if item_name in cookbook.ingredients:
+		# item is an ingredient
+		if item_name in ingredients_quantity:
+			ingredients_quantity[item_name] += quantity_needed
+		else:
+			ingredients_quantity[item_name] = quantity_needed
+	else:
+		# item is a recipe
+		recipe = cookbook.recipes[item_name]
+		for required_item in recipe.required_items:
+			update_ingredients(required_item.name, ingredients_quantity, quantity_needed * required_item.quantity)
+
+# handles the logic of the summary GET request
+def summary_logic(recipe_name: str) -> SummaryReturn:
+	ingredients_quantity: Dict[str, int] = {}
+	update_ingredients(recipe_name, ingredients_quantity, 1)
+	ingredients = []
+	total_cook_time = 0
+	for name, quantity in ingredients_quantity.items():
+		ingredients.append(RequiredItem(name, quantity))
+		total_cook_time += cookbook.ingredients[name].cook_time * quantity
+	
+	return {'name': recipe_name, 'cookTime': total_cook_time, 'ingredients': ingredients}
+
+
 # Endpoint that returns a summary of a recipe that corresponds to a query name
 @app.route('/summary', methods=['GET'])
 def summary():
-	# TODO: implement me
-	return 'not implemented', 500
+	recipe_name = request.args.get('name')
+	error_check_result = summary_error_check(recipe_name)
+	if error_check_result.error_occurred:
+		return error_check_result.error_message, error_check_result.error_code
+	return jsonify(summary_logic(recipe_name)), 200
 
 
 # =============================================================================
